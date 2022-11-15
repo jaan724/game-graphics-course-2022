@@ -46,7 +46,7 @@ let vertexShader = `
     
     void main()
     {
-        gl_Position = modelViewProjectionMatrix * vec4(position * sin(time), 0.3);
+        gl_Position = modelViewProjectionMatrix * vec4(position * sin(time), 0.35);
         vec3 viewNormal = (modelViewMatrix * vec4(normal, 0.0)).xyz;
         color = mix(bgColor * 0.8, fgColor, viewNormal.z) + pow(viewNormal.z, 20.0);
     }
