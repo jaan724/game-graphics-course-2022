@@ -48,7 +48,7 @@ let vertexShader = `
     {
         gl_Position = modelViewProjectionMatrix * vec4(position + normal * sin(time), 0.35);
         vec3 viewNormal = (modelViewMatrix * vec4(normal, 0.0)).xyz;
-        color = mix(bgColor * 0.8, fgColor, viewNormal.z) + pow(viewNormal.z, 20.0);
+        color = mix(bgColor * 0.8, fgColor, abs(viewNormal.z)) + pow(viewNormal.z, 20.0);
     }
 `;
 
@@ -68,7 +68,7 @@ let fragmentShader = `
     
     void main()
     {
-        outColor = color;
+        outColor = color * tan(time);
     }
 `;
 
