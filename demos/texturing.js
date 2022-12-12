@@ -8,19 +8,7 @@ import PicoGL from "../node_modules/picogl/build/module/picogl.js";
 import {mat4, vec3} from "../node_modules/gl-matrix/esm/index.js";
 
 import {positions, uvs, indices} from "../blender/cube.js";
-
-const planePositions = new Float32Array([
-    -1.0, 1.0, 1.0,
-    1.0, 1.0, 1.0,
-    -1.0, -1.0, 1.0,
-    1.0, -1.0, 1.0
-]);
-
-const planeIndices = new Uint32Array([
-    0, 2, 1,
-    2, 3, 1
-]);
-
+import {positions as planePositions, indices as planeIndices} from "../blender/plane.js";
 
 // language=GLSL
 let fragmentShader = `
@@ -88,12 +76,10 @@ let skyboxVertexShader = `
     out vec4 v_position;
     
     void main() {
-      v_position = position;
-      gl_Position = position;
+      v_position = vec4(position.xz, 1.0, 1.0);
+      gl_Position = v_position;
     }
 `;
-
-app.enable(PicoGL.CULL_FACE);
 
 let program = app.createProgram(vertexShader.trim(), fragmentShader.trim());
 let skyboxProgram = app.createProgram(skyboxVertexShader.trim(), skyboxFragmentShader.trim());
@@ -171,10 +157,12 @@ function draw(timems) {
     app.clear();
 
     app.disable(PicoGL.DEPTH_TEST);
+    app.disable(PicoGL.CULL_FACE);
     skyboxDrawCall.uniform("viewProjectionInverse", skyboxViewProjectionInverse);
     skyboxDrawCall.draw();
 
     app.enable(PicoGL.DEPTH_TEST);
+    app.enable(PicoGL.CULL_FACE);
     drawCall.uniform("modelViewProjectionMatrix", modelViewProjectionMatrix);
     drawCall.uniform("time", time);
     drawCall.draw();
