@@ -135,7 +135,7 @@ let drawCall = app.createDrawCall(program, vertexArray)
     .uniform("cameraPosition", cameraPosition)
     .uniform("lightPosition", lightPosition)
     .uniform("lightModelViewProjectionMatrix", lightModelViewProjectionMatrix)
-    //.texture("shadowMap", shadowDepthTarget);
+    .texture("shadowMap", shadowDepthTarget);
 
 let shadowDrawCall = app.createDrawCall(shadowProgram, vertexArray)
     .uniform("lightModelViewProjectionMatrix", lightModelViewProjectionMatrix);

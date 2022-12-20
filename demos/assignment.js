@@ -6,6 +6,18 @@ import {positions as planePositions, uvs as planeUvs, indices as planeIndices} f
 import {positions as secondPositions, uvs as secondUvs, indices as secondIndices} from "../blender/dissk.js"
 
 
+let postPositions = new Float32Array([
+    0.0, 1.0,
+    1.0, 1.0,
+    0.0, 0.0,
+    1.0, 0.0,
+]);
+
+let postIndices = new Uint32Array([
+    0, 2, 1,
+    2, 3, 1
+]);
+
 let baseColor = vec3.fromValues(0.5, 0.8, 0.18);
 let ambientLightColor = vec3.fromValues(0.1, 0.1, 1.0);
 let numberOfPointLights = 2;
@@ -61,6 +73,7 @@ let fragmentShader = `
     
     uniform samplerCube cubemap;    
         
+    uniform vec4 bbaseColor;
     uniform vec3 lightPosition;
     uniform sampler2DShadow shadowMap;
 
@@ -70,6 +83,10 @@ let fragmentShader = `
     in vec3 viewDir;
     in vec4 vPositionFromLight;
     in vec3 vModelPosition;
+    uniform vec4 ambientColor;
+
+
+    //out vec4 fragColor;
 
     
     out vec4 outColor;
@@ -86,6 +103,10 @@ let fragmentShader = `
         vec3 eyeDirection = normalize(cameraPosition - vPosition);
         vec3 lightDirection = normalize(lightPosition - vPosition);        
         vec3 reflectionDirection = reflect(-lightDirection, normal);
+
+        float diffuse = max(dot(lightDirection, normal), 0.0) * max(shadow, 0.2);        
+        float specular = shadow * pow(max(dot(reflectionDirection, eyeDirection), 0.0), 100.0) * 0.7;
+        //fragColor = vec4(diffuse * bbaseColor.rgb + ambientColor.rgb + specular, bbaseColor.a);
 
         // Try using a higher mipmap LOD to get a rough material effect without any performance impact
         //outColor = textureLod(cubemap, reflectedDir, 10.0);
@@ -152,6 +173,94 @@ let shadowVertexShader = `
     
     void main() {
         gl_Position = lightModelViewProjectionMatrix * position;
+    }
+`;
+
+let postFragmentShader = `
+    #version 300 es
+    precision mediump float;
+    
+    uniform sampler2D tex;
+    uniform sampler2D depthTex;
+    uniform float time;
+    uniform sampler2D noiseTex;
+    
+    in vec4 v_position;
+    
+    out vec4 outColor;
+    
+    vec4 depthOfField(vec4 col, float depth, vec2 uv) {
+        vec4 blur = vec4(0.0);
+        float n = 0.0;
+        for (float u = -1.0; u <= 1.0; u += 0.4)    
+            for (float v = -1.0; v <= 1.0; v += 0.4) {
+                float factor = abs(depth - 0.995) * 350.0;
+                blur += texture(tex, uv + vec2(u, v) * factor * 0.02);
+                n += 1.0;
+            }                
+        return blur / n;
+    }
+    
+    vec4 ambientOcclusion(vec4 col, float depth, vec2 uv) {
+        if (depth == 1.0) return col;
+        for (float u = -2.0; u <= 2.0; u += 0.4)    
+            for (float v = -2.0; v <= 2.0; v += 0.4) {                
+                float d = texture(depthTex, uv + vec2(u, v) * 0.01).r;
+                if (d != 1.0) {
+                    float diff = abs(depth - d);
+                    col *= 1.0 - diff * 30.0;
+                }
+            }
+        return col;        
+    }   
+    
+    float random(vec2 seed) {
+        return texture(noiseTex, seed * 5.0 + sin(time * 543.12) * 54.12).r - 0.5;
+    }
+    
+    void main() {
+        vec4 col = texture(tex, v_position.xy);
+        float depth = texture(depthTex, v_position.xy).r;
+        
+        // Chromatic aberration 
+        //vec2 caOffset = vec2(0.01, 0.0);
+        //col.r = texture(tex, v_position.xy - caOffset).r;
+        //col.b = texture(tex, v_position.xy + caOffset).b;
+        
+        // Depth of field
+        //col = depthOfField(col, depth, v_position.xy);
+
+        // Noise         
+        col.rgb += (2.0 - col.rgb) * random(v_position.xy) * 0.4;
+        
+        // Contrast + Brightness
+        col = pow(col, vec4(1.8)) * 0.8;
+        
+        // Color curves
+        col.rgb = col.rgb * vec3(1.2, 1.1, 1.0) + vec3(0.0, 0.05, 0.2);
+        
+        // Ambient Occlusion
+        //col = ambientOcclusion(col, depth, v_position.xy);                
+        
+        // Invert
+        //col.rgb = 1.0 - col.rgb;
+        
+        // Fog
+        //col.rgb = col.rgb + vec3((depth - 0.992) * 200.0);         
+                        
+        outColor = col;
+    }
+`;
+
+let postVertexShader = `
+    #version 300 es
+    
+    layout(location=0) in vec4 position;
+    out vec4 v_position;
+    
+    void main() {
+        v_position = position;
+        gl_Position = position * 2.0 - 1.0;
     }
 `;
 
@@ -230,15 +339,33 @@ let skyboxVertexShader = `
     }
 `;
 
+
+async function loadTexture(fileName) {
+    return await createImageBitmap(await (await fetch("images/" + fileName)).blob());
+}
+
+(async () => {
+let fgColor = vec4.fromValues(1.0, 0.9, 0.5, 1.0);
+
 let program = app.createProgram(vertexShader, fragmentShader);
 let skyboxProgram = app.createProgram(skyboxVertexShader, skyboxFragmentShader);
 let mirrorProgram = app.createProgram(mirrorVertexShader, mirrorFragmentShader);
 let shadowProgram = app.createProgram(shadowVertexShader, shadowFragmentShader);
+let postProgram = app.createProgram(postVertexShader.trim(), postFragmentShader.trim());
 
 let vertexArray = app.createVertexArray()
     .vertexAttributeBuffer(0, app.createVertexBuffer(PicoGL.FLOAT, 3, positions))
     .vertexAttributeBuffer(1, app.createVertexBuffer(PicoGL.FLOAT, 3, normals))
     .indexBuffer(app.createIndexBuffer(PicoGL.UNSIGNED_INT, 3, indices));
+
+let postArray = app.createVertexArray()
+    .vertexAttributeBuffer(0, app.createVertexBuffer(PicoGL.FLOAT, 2, postPositions))
+    .indexBuffer(app.createIndexBuffer(PicoGL.UNSIGNED_INT, 3, postIndices));
+
+let colorTarget = app.createTexture2D(app.width, app.height, {magFilter: PicoGL.LINEAR, wrapS: PicoGL.CLAMP_TO_EDGE, wrapR: PicoGL.CLAMP_TO_EDGE});
+let depthTarget = app.createTexture2D(app.width, app.height, {internalFormat: PicoGL.DEPTH_COMPONENT32F, type: PicoGL.FLOAT});
+let buffer = app.createFramebuffer().colorTarget(0, colorTarget).depthTarget(depthTarget);
+
 
 const planePositionsBuffer = app.createVertexBuffer(PicoGL.FLOAT, 3, planePositions);
 const planeUvsBuffer = app.createVertexBuffer(PicoGL.FLOAT, 2, planeUvs);
@@ -257,7 +384,7 @@ let mirrorArray = app.createVertexArray()
     .vertexAttributeBuffer(1, planeUvsBuffer)
     .indexBuffer(planeIndicesBuffer);
 
-let shadowDepthTarget = app.createTexture2D(1000, 1000, {
+let shadowDepthTarget = app.createTexture2D(512, 512, {
     internalFormat: PicoGL.DEPTH_COMPONENT16,
     compareMode: PicoGL.COMPARE_REF_TO_TEXTURE,
     magFilter: PicoGL.LINEAR,
@@ -359,6 +486,7 @@ const cubemap = app.createCubemap({
 let drawCall = app.createDrawCall(program, vertexArray)
     .texture("cubemap", cubemap)
     .uniform("baseColor", baseColor)
+    .uniform("bbaseColor", fgColor)
     .uniform("modelMatrix", modelMatrix)
     .uniform("ambientLightColor", ambientLightColor)
     .uniform("lightPosition", lightPosition)
@@ -378,6 +506,11 @@ let mirrorDrawCall = app.createDrawCall(mirrorProgram, mirrorArray)
         wrapS: PicoGL.MIRRORED_REPEAT,
         wrapT: PicoGL.MIRRORED_REPEAT
     }));
+
+let postDrawCall = app.createDrawCall(postProgram, postArray)
+    .texture("tex", colorTarget)
+    .texture("depthTex", depthTarget)
+    .texture("noiseTex", app.createTexture2D(await loadTexture("noise.png")));
 
 mat4.fromXRotation(modelMatrix, -Math.PI / 2);
 
@@ -449,11 +582,19 @@ function draw(timems) {
         colorsBuffer.set(pointLightColors[i], i * 3);
     }
 
+    app.clear();
     drawCall.uniform("lightPositions[0]", positionsBuffer);
     drawCall.uniform("lightColors[0]", colorsBuffer);
 
-    app.clear();
-    drawCall.draw();
+
+    app.drawFramebuffer(buffer);
+    app.viewport(0, 0, colorTarget.width, colorTarget.height);
+
+    app.enable(PicoGL.DEPTH_TEST)
+        .enable(PicoGL.CULL_FACE)
+        .clear();
+
+    
 
     mat4.fromXRotation(rotateXMatrix, time * 2 - Math.PI / 2);
     mat4.fromZRotation(rotateYMatrix, time * 3);
@@ -467,14 +608,25 @@ function draw(timems) {
     vec3.set(lightPosition, 5, 5, 2.5);
 
 
-    renderShadowMap();
-
-    
-    renderReflectionTexture();
+    app.clear();
+    drawCall.draw();
     drawObjects(cameraPosition, viewMatrix);
     drawMirror();
+    renderReflectionTexture();
+    renderShadowMap();
 
+
+
+    app.defaultDrawFramebuffer();
+    app.viewport(0, 0, app.width, app.height);
+
+     app.disable(PicoGL.DEPTH_TEST)
+        .disable(PicoGL.CULL_FACE);
+
+    postDrawCall.uniform("time", time);
+    postDrawCall.draw();
 
     requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
+})();
